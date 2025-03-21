@@ -54,12 +54,13 @@ module Yabeda
         retry_count_tags = config.retries_segmented_by_queue ? %i[queue] : []
 
         gauge     :jobs_waiting_count,   tags: %i[queue],        aggregation: :most_recent, comment: "The number of jobs waiting to process in sidekiq."
-        gauge     :active_workers_count, tags: [],               aggregation: :most_recent,
-                                         comment: "The number of currently running machines with sidekiq workers."
+        gauge     :active_workers_count, tags: [],               aggregation: :most_recent, comment: "The number of busy Sidekiq worker threads (global counter)."
         gauge     :jobs_scheduled_count, tags: [],               aggregation: :most_recent, comment: "The number of jobs scheduled for later execution."
         gauge     :jobs_retry_count,     tags: retry_count_tags, aggregation: :most_recent, comment: "The number of failed jobs waiting to be retried"
         gauge     :jobs_dead_count,      tags: [],               aggregation: :most_recent, comment: "The number of jobs exceeded their retry count."
         gauge     :active_processes,     tags: [],               aggregation: :most_recent, comment: "The number of active Sidekiq worker processes."
+        gauge     :total_workers,        tags: [],               aggregation: :most_recent, comment: "The number of running Sidekiq worker threads for current host."
+        gauge     :busy_workers,         tags: [],               aggregation: :most_recent, comment: "The number of busy Sidekiq worker threads for current host."
         gauge     :queue_latency,        tags: %i[queue],        aggregation: :most_recent,
                                          comment: "The queue latency, the difference in seconds since the oldest job in the queue was enqueued"
       end
@@ -78,6 +79,12 @@ module Yabeda
         sidekiq_jobs_scheduled_count.set({}, stats.scheduled_size)
         sidekiq_jobs_dead_count.set({}, stats.dead_size)
         sidekiq_active_processes.set({}, stats.processes_size)
+
+        ::Sidekiq::ProcessSet.new.each do |process|
+          next unless Socket.gethostname == process["hostname"]
+          sidekiq_total_workers.set({}, process["concurrency"].to_i)
+          sidekiq_busy_workers.set({}, process["busy"].to_i)
+        end
 
         ::Sidekiq::Queue.all.each do |queue|
           sidekiq_queue_latency.set({ queue: queue.name }, queue.latency)
