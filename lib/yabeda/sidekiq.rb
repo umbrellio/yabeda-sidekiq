@@ -80,8 +80,9 @@ module Yabeda
         sidekiq_jobs_dead_count.set({}, stats.dead_size)
         sidekiq_active_processes.set({}, stats.processes_size)
 
+        hostname = Socket.gethostname
         ::Sidekiq::ProcessSet.new.each do |process|
-          next unless Socket.gethostname == process["hostname"]
+          next unless hostname == process["hostname"]
           sidekiq_total_workers.set({}, process["concurrency"].to_i)
           sidekiq_busy_workers.set({}, process["busy"].to_i)
         end
