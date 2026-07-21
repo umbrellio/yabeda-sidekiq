@@ -1,13 +1,17 @@
 # frozen_string_literal: true
 
 require "bundler/setup"
+require "ostruct" # Not auto-required by newer dependency versions
 require "sidekiq/cli" # Fake that we're a worker to test worker-specific things
 require "yabeda/sidekiq"
 
 require "yabeda/rspec"
 require "sidekiq/testing"
 require "active_job"
-require "active_job/queue_adapters/sidekiq_adapter"
+# NOTE: Sidekiq >= 7.3.3 ships its own copy of this file which shadows the ActiveJob
+# one in $LOAD_PATH, but works only inside a full Rails app. Require the
+# self-contained ActiveJob implementation by the full path instead.
+require "#{Gem.loaded_specs['activejob'].full_gem_path}/lib/active_job/queue_adapters/sidekiq_adapter"
 require "pry"
 
 require_relative "support/custom_metrics"

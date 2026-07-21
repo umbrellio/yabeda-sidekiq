@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 ## Unreleased
 
+### Added
+
+- Object allocation metrics for job execution: `sidekiq_allocations_total` (object count) and `sidekiq_malloc_increase_bytes` (off-heap malloc increase since the last GC), both segmented by queue and worker. `sidekiq_malloc_increase_bytes` requires the `ActiveSupport::Notifications::Event` patch from [umbrellio-utils](https://github.com/umbrellio/utils).
+
+- `perform.sidekiq_job` ActiveSupport notification wrapping job execution (when ActiveSupport is available), so custom metrics and logging subscribers can measure jobs.
+
 ## 0.12.0 - 2024-03-08
 
 ### Added

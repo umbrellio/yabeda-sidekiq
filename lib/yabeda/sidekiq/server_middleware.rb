@@ -7,10 +7,28 @@ module Yabeda
       # See https://github.com/mperham/sidekiq/discussions/4971
       JOB_RECORD_CLASS = defined?(::Sidekiq::JobRecord) ? ::Sidekiq::JobRecord : ::Sidekiq::Job
 
+      # NOTE: The "perform.sidekiq_job" notification wraps the job execution so that
+      # subscribers (metrics, logging) receive an Event with populated monotonic stats:
+      # allocations and, when ActiveSupport::Notifications::Event is patched by
+      # umbrellio-utils, gvl_time with malloc_increase_bytes.
+      def call(worker, job, queue, &block)
+        if defined?(::ActiveSupport::Notifications)
+          labels = Yabeda::Sidekiq.labelize(worker, job, queue)
+          ::ActiveSupport::Notifications.instrument("perform.sidekiq_job", **labels) do
+            instrumented_call(worker, job, queue, labels, &block)
+          end
+        else
+          instrumented_call(worker, job, queue, &block)
+        end
+      end
+
+      private
+
       # rubocop: disable Metrics/AbcSize, Metrics/MethodLength:
-      def call(worker, job, queue)
+      def instrumented_call(worker, job, queue, labels = nil)
         custom_tags = Yabeda::Sidekiq.custom_tags(worker, job).to_h
-        labels = Yabeda::Sidekiq.labelize(worker, job, queue).merge(custom_tags)
+        # Reuse the labels already computed for the notification when present.
+        labels = (labels || Yabeda::Sidekiq.labelize(worker, job, queue)).merge(custom_tags)
         start = Process.clock_gettime(Process::CLOCK_MONOTONIC)
         begin
           job_instance = JOB_RECORD_CLASS.new(job)
@@ -32,8 +50,6 @@ module Yabeda
         end
       end
       # rubocop: enable Metrics/AbcSize, Metrics/MethodLength:
-
-      private
 
       def elapsed(start)
         (Process.clock_gettime(Process::CLOCK_MONOTONIC) - start).round(3)

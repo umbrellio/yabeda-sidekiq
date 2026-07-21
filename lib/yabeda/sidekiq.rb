@@ -34,6 +34,10 @@ module Yabeda
         counter   :jobs_executed_total,  tags: %i[queue worker], comment: "A counter of the total number of jobs sidekiq executed."
         counter   :jobs_success_total,   tags: %i[queue worker], comment: "A counter of the total number of jobs successfully processed by sidekiq."
         counter   :jobs_failed_total,    tags: failed_total_tags, comment: "A counter of the total number of jobs failed in sidekiq."
+        counter   :allocations_total,    tags: %i[queue worker], comment: "Object allocations during job execution (process-global, approximate)."
+        # NOTE: off-heap malloc increase since the last GC, not total bytes allocated;
+        # a lower bound that is unreliable across GC (see the umbrellio-utils patch).
+        counter   :malloc_increase_bytes, tags: %i[queue worker], comment: "A counter of malloc'd (off-heap) bytes since the last GC during job execution."
 
         gauge     :running_job_runtime,  tags: %i[queue worker], aggregation: :max, unit: :seconds,
                                          comment: "How long currently running jobs are running (useful for detection of hung jobs)"
@@ -46,6 +50,23 @@ module Yabeda
                                 unit: :seconds, per: :job,
                                 tags: %i[queue worker],
                                 buckets: LONG_RUNNING_JOB_RUNTIME_BUCKETS
+
+        # NOTE: The event is published by ServerMiddleware. Allocation stats are read
+        # from the Event: +allocations+ is provided by ActiveSupport 6+ itself,
+        # +malloc_increase_bytes+ appears when the Event class is patched by umbrellio-utils.
+        if defined?(::ActiveSupport::Notifications)
+          ::ActiveSupport::Notifications.subscribe("perform.sidekiq_job") do |event|
+            next unless event.respond_to?(:allocations)
+
+            labels = { queue: event.payload[:queue], worker: event.payload[:worker] }
+
+            Yabeda.sidekiq_allocations_total.increment(labels, by: event.allocations)
+
+            if event.respond_to?(:malloc_increase_bytes) && event.malloc_increase_bytes.positive?
+              Yabeda.sidekiq_malloc_increase_bytes.increment(labels, by: event.malloc_increase_bytes)
+            end
+          end
+        end
       end
 
       # Metrics not specific for current Sidekiq process, but representing state of the whole Sidekiq installation (queues, processes, etc)
