@@ -251,6 +251,91 @@ RSpec.describe Yabeda::Sidekiq do
         )
     end
 
+    context "when show_queue_state is set to true" do
+      # Pausing a queue is a Sidekiq Pro feature, so +paused?+ is stubbed in rather than
+      # assumed to exist on the queue objects
+      let(:running_queue) { pausable_queue("default", 0.5, paused: false) }
+      let(:paused_queue) { pausable_queue("mailers", 0, paused: true) }
+
+      around do |example|
+        old_value = described_class.config.show_queue_state
+        described_class.config.show_queue_state = true
+
+        example.run
+
+        described_class.config.show_queue_state = old_value
+      end
+
+      before do
+        allow(Sidekiq::Queue).to receive(:all).and_return([running_queue, paused_queue])
+      end
+
+      it "segments queue latencies by queue state" do
+        expect { Yabeda.collect! }.to \
+          update_yabeda_gauge(Yabeda.sidekiq.queue_latency).with(
+            { queue: "default", state: "unpaused" } => 0.5,
+            { queue: "mailers", state: "paused" } => 0.0,
+          )
+      end
+
+      it "segments queue sizes by queue state" do
+        expect { Yabeda.collect! }.to \
+          update_yabeda_gauge(Yabeda.sidekiq.jobs_waiting_count).with(
+            { queue: "default", state: "unpaused" } => 5,
+            { queue: "mailers", state: "paused" } => 4,
+          )
+      end
+
+      it "resolves the state of every queue only once per collection cycle", :aggregate_failures do
+        Yabeda.collect!
+
+        expect(running_queue).to have_received(:paused?).once
+        expect(paused_queue).to have_received(:paused?).once
+      end
+
+      # Queues can only be paused with Sidekiq Pro, so on OSS Sidekiq +paused?+ may be missing
+      context "when queues do not support pausing" do
+        before do
+          allow(Sidekiq::Queue).to receive(:all).and_return(
+            [OpenStruct.new({ name: "default", latency: 0.5 })],
+          )
+        end
+
+        it "reports them as unpaused instead of failing the whole collection cycle" do
+          expect { Yabeda.collect! }.to \
+            update_yabeda_gauge(Yabeda.sidekiq.queue_latency).with(
+              { queue: "default", state: "unpaused" } => 0.5,
+            )
+        end
+      end
+
+      # +Sidekiq::Stats#queues+ and +Sidekiq::Queue.all+ are two separate Redis reads,
+      # so the queue list can miss a queue that the stats still know about
+      context "when a queue is known to the stats but not to the queue list" do
+        before { allow(Sidekiq::Queue).to receive(:all).and_return([paused_queue]) }
+
+        it "falls back to unpaused instead of emitting a nil label" do
+          expect { Yabeda.collect! }.to \
+            update_yabeda_gauge(Yabeda.sidekiq.jobs_waiting_count).with(
+              { queue: "mailers", state: "paused" } => 4,
+              { queue: "default", state: "unpaused" } => 5,
+            )
+        end
+      end
+    end
+
+    context "when show_queue_state is left disabled" do
+      let(:queue) { pausable_queue("default", 0.5, paused: false) }
+
+      before { allow(Sidekiq::Queue).to receive(:all).and_return([queue]) }
+
+      it "does not ask queues for their state, keeping the extra Redis calls at zero" do
+        Yabeda.collect!
+
+        expect(queue).not_to have_received(:paused?)
+      end
+    end
+
     it "collects named queues stats", :aggregate_failures do
       expect { Yabeda.collect! }.to \
         update_yabeda_gauge(Yabeda.sidekiq.jobs_retry_count).with(1).and \
@@ -286,6 +371,14 @@ RSpec.describe Yabeda::Sidekiq do
         update_yabeda_gauge(Yabeda.sidekiq.running_job_runtime).with(
           { queue: "default", worker: "SampleLongRunningJob" } => 0.0,
         )
+    end
+  end
+
+  # Stubbed +Sidekiq::Queue+ that knows whether it is paused, like the Sidekiq Pro one does.
+  # Stubbing +paused?+ instead of putting it into the OpenStruct keeps the call counts assertable.
+  def pausable_queue(name, latency, paused:)
+    OpenStruct.new({ name: name, latency: latency }).tap do |queue|
+      allow(queue).to receive(:paused?).and_return(paused)
     end
   end
 

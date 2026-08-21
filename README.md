@@ -68,6 +68,30 @@ Metrics representing state of the whole Sidekiq installation (queues, processes,
 
 By default all sidekiq worker processes (servers) collects global metrics about whole Sidekiq installation. This can be overridden by setting `collect_cluster_metrics` config key to `true` for non-Sidekiq processes or to `false` for Sidekiq processes (e.g. by setting `YABEDA_SIDEKIQ_COLLECT_CLUSTER_METRICS` env variable to `no`, see other methods in [anyway_config] docs).
 
+#### Paused queues
+
+A paused queue keeps accepting jobs while nothing works them off, so `sidekiq_jobs_waiting_count` and `sidekiq_queue_latency` grow exactly as they do under a real overload. Set `show_queue_state` to `true` (e.g. `YABEDA_SIDEKIQ_SHOW_QUEUE_STATE=yes`) to add a `state` label to both metrics, with the value `paused` or `unpaused`:
+
+```
+sidekiq_jobs_waiting_count{queue="default",state="unpaused"} 1234
+sidekiq_queue_latency{queue="mailers",state="paused"} 3600
+```
+
+That makes the two cases distinguishable in alerts, so you can page on backlog only for queues that are supposed to be draining:
+
+```
+sidekiq_jobs_waiting_count{state="unpaused"} > 10000
+```
+
+It is disabled by default for two reasons:
+
+ - it costs one extra Redis call per queue on every collection cycle;
+ - it adds a label to metrics that already exist, which changes their time series — recorded rules, alerts and dashboards written against the unlabelled `sidekiq_jobs_waiting_count` and `sidekiq_queue_latency` will silently stop matching after you enable it.
+
+Like every other label, `state` is declared when Yabeda configures itself, so the setting has to be in place before that happens (an env variable or a config file, not an assignment from an initializer that runs later). Adapters that require all labels to be declared up front, such as [yabeda-prometheus], will otherwise reject the metric.
+
+Pausing a queue is a [Sidekiq Pro] feature. On OSS Sidekiq the label is still emitted, always with the value `unpaused`.
+
 ### Client metrics
 
 Metrics collected where jobs are being pushed to queues (everywhere):
@@ -111,6 +135,7 @@ Configuration is handled by [anyway_config] gem. With it you can load settings f
 | `declare_process_metrics`                      | boolean | Enabled in Sidekiq worker processes, disabled otherwise | Declare metrics that are only tracked inside worker process even outside of them. Useful for multiprocess metric collection.                       |
 | `retries_segmented_by_queue`                   | boolean | Disabled                                                | Defines wheter retries are segemented by queue or reported as a single metric                                                                      |
 | `label_for_error_class_on_sidekiq_jobs_failed` | boolean | Disabled                                                | Defines whether `error` label should be added to `sidekiq_jobs_failed_total` metric.                                                               |
+| `show_queue_state`                             | boolean | Disabled                                                | Defines whether `state` label (`paused`/`unpaused`) should be added to `sidekiq_jobs_waiting_count` and `sidekiq_queue_latency` metrics.            |
 
 # Roadmap (TODO or Help wanted)
 
@@ -167,6 +192,7 @@ Bug reports and pull requests are welcome on GitHub at https://github.com/yabeda
 The gem is available as open source under the terms of the [MIT License](https://opensource.org/licenses/MIT).
 
 [Sidekiq]: https://github.com/mperham/sidekiq/ "Simple, efficient background processing for Ruby"
+[Sidekiq Pro]: https://sidekiq.org/products/pro.html "Commercial extensions for Sidekiq, including pausable queues"
 [yabeda]: https://github.com/yabeda-rb/yabeda
 [yabeda-prometheus]: https://github.com/yabeda-rb/yabeda-prometheus
 [anyway_config]: https://github.com/palkan/anyway_config "Configuration library for Ruby gems and applications"
