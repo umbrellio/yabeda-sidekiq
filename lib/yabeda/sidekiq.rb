@@ -59,7 +59,7 @@ module Yabeda
         # NOTE: The event is published by ServerMiddleware. Allocation stats are read
         # from the Event: +allocations+ is provided by ActiveSupport 6+ itself,
         # +malloc_increase_bytes+ appears when the Event class is patched by umbrellio-utils.
-        if defined?(::ActiveSupport::Notifications)
+        if defined?(::ActiveSupport::Notifications) && config.gather_generic_sidekiq_metrics
           ::ActiveSupport::Notifications.subscribe("perform.sidekiq_job") do |event|
             next unless event.respond_to?(:allocations)
 

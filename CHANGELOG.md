@@ -9,6 +9,8 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 ### Added
 
+- **(24.08.2026)** `peroform.sidekiq_job` is shadowed via `config.gather_generic_sidekiq_metrics` configuration that is disabled by default (`false`);
+
 - Object allocation metrics for job execution: `sidekiq_allocations_total` (object count) and `sidekiq_malloc_increase_bytes` (off-heap malloc increase since the last GC), both segmented by queue and worker. `sidekiq_malloc_increase_bytes` requires the `ActiveSupport::Notifications::Event` patch from [umbrellio-utils](https://github.com/umbrellio/utils).
 
 - `perform.sidekiq_job` ActiveSupport notification wrapping job execution (when ActiveSupport is available), so custom metrics and logging subscribers can measure jobs.
