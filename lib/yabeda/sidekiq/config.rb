@@ -24,6 +24,7 @@ module Yabeda
       # If set to true, an `:error` label will be added with name of the error class to all failed jobs
       attr_config label_for_error_class_on_sidekiq_jobs_failed: false
 
+      # If set to true, default event subscriptions are initialized (such as `perform.sidekiq_job` and so on);
       attr_config gather_generic_sidekiq_metrics: false
 
       # Adds a +state+ label (+paused+ or +unpaused+) to the per-queue cluster metrics:
