@@ -25,7 +25,7 @@ module Yabeda
       attr_config label_for_error_class_on_sidekiq_jobs_failed: false
 
       # If set to true, default event subscriptions are initialized (such as `perform.sidekiq_job` and so on);
-      attr_config gather_generic_sidekiq_metrics: false
+      attr_config gather_memory_alloc_metrics: false
 
       # Adds a +state+ label (+paused+ or +unpaused+) to the per-queue cluster metrics:
       # +sidekiq_jobs_waiting_count+ and +sidekiq_queue_latency+.

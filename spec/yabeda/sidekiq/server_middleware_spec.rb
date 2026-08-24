@@ -7,31 +7,15 @@ RSpec.describe Yabeda::Sidekiq::ServerMiddleware, sidekiq: :inline do
   end
 
   before do
-    Yabeda.configure { |c| c.gather_generic_sidekiq_metrics = true }
+    Yabeda::Sidekiq.config.gather_memory_alloc_metrics = true
   end
 
   after do
+    Yabeda::Sidekiq.config.gather_memory_alloc_metrics = false
     ActiveSupport::Notifications.unsubscribe(subscription)
-    Yabeda.configure { |c| c.gather_generic_sidekiq_metrics = false }
-  end
-
-  context "when the generic metrics gathering is disabled" do
-    before do
-      Yabeda.configure { |c| c.gather_generic_sidekiq_metrics = true }
-    end
-
-    it "nothing is produced" do
-      expect(events.size).to eq(0)
-      SamplePlainJob.perform_async
-      expect(events.size).to eq(0)
-    end
   end
 
   context "when the generic metrics gathering is enabled" do
-    before do
-      Yabeda.configure { |c| c.gather_generic_sidekiq_metrics = true }
-    end
-
     it "wraps successful job execution into the event with worker labels" do
       SamplePlainJob.perform_async
 

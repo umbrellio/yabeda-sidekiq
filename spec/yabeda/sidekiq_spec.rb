@@ -2,7 +2,7 @@
 
 RSpec.describe Yabeda::Sidekiq do
   it "has a version number" do
-    expect(Yabeda::Sidekiq::VERSION).not_to be nil
+    expect(Yabeda::Sidekiq::VERSION).not_to be_nil
   end
 
   it "configures middlewares" do

@@ -9,7 +9,9 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 ### Added
 
-- **(24.08.2026)** `peroform.sidekiq_job` is shadowed via `config.gather_generic_sidekiq_metrics` configuration that is disabled by default (`false`);
+- **(24.08.2026)** `perform.sidekiq_job` is shadowed via `config.gather_memory_alloc_metrics` configuration that is disabled by default (`false`)
+
+- **(24.08.2026)** `perform.sidekiq_job` event subscription is not more autoamtically generated, you need manually invoke `Yabeda::Sidekiq.track_sidekiq_allocations_by_default` in your code. It was made cuz client projects can have their own active-support-based event->prometehus gathering with their own format. You can use the default yabed-sidekiq-tracking subscirpition or make your own.
 
 - Object allocation metrics for job execution: `sidekiq_allocations_total` (object count) and `sidekiq_malloc_increase_bytes` (off-heap malloc increase since the last GC), both segmented by queue and worker. `sidekiq_malloc_increase_bytes` requires the `ActiveSupport::Notifications::Event` patch from [umbrellio-utils](https://github.com/umbrellio/utils).
 

@@ -12,7 +12,7 @@ module Yabeda
       # allocations and, when ActiveSupport::Notifications::Event is patched by
       # umbrellio-utils, gvl_time with malloc_increase_bytes.
       def call(worker, job, queue, &block)
-        if defined?(::ActiveSupport::Notifications) && config.gather_generic_sidekiq_metrics
+        if defined?(::ActiveSupport::Notifications) && config.gather_memory_alloc_metrics
           labels = Yabeda::Sidekiq.labelize(worker, job, queue)
           ::ActiveSupport::Notifications.instrument("perform.sidekiq_job", **labels) do
             instrumented_call(worker, job, queue, labels, &block)

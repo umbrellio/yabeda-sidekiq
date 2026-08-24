@@ -55,23 +55,6 @@ module Yabeda
                                 unit: :seconds, per: :job,
                                 tags: %i[queue worker],
                                 buckets: LONG_RUNNING_JOB_RUNTIME_BUCKETS
-
-        # NOTE: The event is published by ServerMiddleware. Allocation stats are read
-        # from the Event: +allocations+ is provided by ActiveSupport 6+ itself,
-        # +malloc_increase_bytes+ appears when the Event class is patched by umbrellio-utils.
-        if defined?(::ActiveSupport::Notifications) && config.gather_generic_sidekiq_metrics
-          ::ActiveSupport::Notifications.subscribe("perform.sidekiq_job") do |event|
-            next unless event.respond_to?(:allocations)
-
-            labels = { queue: event.payload[:queue], worker: event.payload[:worker] }
-
-            Yabeda.sidekiq_allocations_total.increment(labels, by: event.allocations)
-
-            if event.respond_to?(:malloc_increase_bytes) && event.malloc_increase_bytes.positive?
-              Yabeda.sidekiq_malloc_increase_bytes.increment(labels, by: event.malloc_increase_bytes)
-            end
-          end
-        end
       end
 
       # Metrics not specific for current Sidekiq process, but representing state of the whole Sidekiq installation (queues, processes, etc)
@@ -209,6 +192,23 @@ module Yabeda
           oldest_job_started_at = jobs.values.min
           oldest_job_duration = oldest_job_started_at ? (now - oldest_job_started_at).round(3) : 0
           Yabeda.sidekiq.running_job_runtime.set(labels, oldest_job_duration)
+        end
+      end
+
+      def track_sidekiq_allocations_by_default
+        # NOTE: The event is published by ServerMiddleware. Allocation stats are read
+        # from the Event: +allocations+ is provided by ActiveSupport 6+ itself,
+        # +malloc_increase_bytes+ appears when the Event class is patched by umbrellio-utils.
+        return unless defined?(::ActiveSupport::Notifications)
+
+        ::ActiveSupport::Notifications.subscribe("perform.sidekiq_job") do |event|
+          next unless event.respond_to?(:allocations)
+
+          labels = { queue: event.payload[:queue], worker: event.payload[:worker] }
+          Yabeda.sidekiq_allocations_total.increment(labels, by: event.allocations)
+          if event.respond_to?(:malloc_increase_bytes) && event.malloc_increase_bytes.positive?
+            Yabeda.sidekiq_malloc_increase_bytes.increment(labels, by: event.malloc_increase_bytes)
+          end
         end
       end
     end
