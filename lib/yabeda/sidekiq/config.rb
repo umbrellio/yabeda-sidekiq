@@ -24,19 +24,14 @@ module Yabeda
       # If set to true, an `:error` label will be added with name of the error class to all failed jobs
       attr_config label_for_error_class_on_sidekiq_jobs_failed: false
 
-      # If set to true, default event subscriptions are initialized (such as `perform.sidekiq_job` and so on);
-      attr_config gather_memory_alloc_metrics: false
-
-      # Adds a +state+ label (+paused+ or +unpaused+) to the per-queue cluster metrics:
-      # +sidekiq_jobs_waiting_count+ and +sidekiq_queue_latency+.
+      # Collects +sidekiq_queue_paused+: 1 when the queue is paused, 0 when it is not.
       #
-      # Disabled by default for two reasons:
-      #  - it costs one extra Redis call per queue on every collection cycle
-      #  - it adds a label to metrics that already exist, which changes their time series and
-      #    silently breaks recorded rules, alerts and dashboards built on the unlabelled ones
+      # Disabled by default because it costs one extra Redis call per queue on every collection
+      # cycle. Enabling it adds a metric and changes no existing one, so it is safe to turn on
+      # without touching recorded rules, alerts or dashboards.
       #
       # Pausing queues is a Sidekiq Pro feature: on OSS Sidekiq every queue is always reported
-      # as +unpaused+.
+      # as not paused.
       attr_config show_queue_state: false
     end
   end

@@ -65,32 +65,30 @@ Metrics representing state of the whole Sidekiq installation (queues, processes,
  - Number of jobs in dead set (“morgue”): `sidekiq_jobs_dead_count`
  - Active processes count: `sidekiq_active_processes`
  - Active servers count: `sidekiq_active_workers_count`
+ - Whether a queue is paused: `sidekiq_queue_paused` (segmented by queue; opt-in, see [Paused queues](#paused-queues))
 
 By default all sidekiq worker processes (servers) collects global metrics about whole Sidekiq installation. This can be overridden by setting `collect_cluster_metrics` config key to `true` for non-Sidekiq processes or to `false` for Sidekiq processes (e.g. by setting `YABEDA_SIDEKIQ_COLLECT_CLUSTER_METRICS` env variable to `no`, see other methods in [anyway_config] docs).
 
 #### Paused queues
 
-A paused queue keeps accepting jobs while nothing works them off, so `sidekiq_jobs_waiting_count` and `sidekiq_queue_latency` grow exactly as they do under a real overload. Set `show_queue_state` to `true` (e.g. `YABEDA_SIDEKIQ_SHOW_QUEUE_STATE=yes`) to add a `state` label to both metrics, with the value `paused` or `unpaused`:
+A paused queue keeps accepting jobs while nothing works them off, so `sidekiq_jobs_waiting_count` and `sidekiq_queue_latency` grow exactly as they do under a real overload. Set `show_queue_state` to `true` (e.g. `YABEDA_SIDEKIQ_SHOW_QUEUE_STATE=yes`) to collect `sidekiq_queue_paused`, which tells the two apart:
 
 ```
-sidekiq_jobs_waiting_count{queue="default",state="unpaused"} 1234
-sidekiq_queue_latency{queue="mailers",state="paused"} 3600
+sidekiq_queue_paused{queue="default"} 0
+sidekiq_queue_paused{queue="mailers"} 1
 ```
 
-That makes the two cases distinguishable in alerts, so you can page on backlog only for queues that are supposed to be draining:
+That lets you page on backlog only for queues that are supposed to be draining:
 
 ```
-sidekiq_jobs_waiting_count{state="unpaused"} > 10000
+sidekiq_jobs_waiting_count > 10000 and on(queue) sidekiq_queue_paused == 0
 ```
 
-It is disabled by default for two reasons:
+It is disabled by default because it costs one extra Redis call per queue on every collection cycle. Enabling it adds a metric and changes no existing one, so recorded rules, alerts and dashboards keep working untouched.
 
- - it costs one extra Redis call per queue on every collection cycle;
- - it adds a label to metrics that already exist, which changes their time series — recorded rules, alerts and dashboards written against the unlabelled `sidekiq_jobs_waiting_count` and `sidekiq_queue_latency` will silently stop matching after you enable it.
+**Why a separate metric and not a `state` label on the existing gauges?** Because a label whose value changes over the life of a series does not work on a gauge that is recomputed every cycle. Prometheus gauges never forget a label combination: pause a queue and `{queue="x",state="paused"}` appears, resume it and that series does not go away — it keeps being exported, with its last value frozen and a fresh scrape timestamp, indefinitely. Both combinations then look equally live and no query can tell which one is current. `sidekiq_queue_paused` carries one series per queue and is rewritten on every collection cycle, so it has nothing to leave behind.
 
-Like every other label, `state` is declared when Yabeda configures itself, so the setting has to be in place before that happens (an env variable or a config file, not an assignment from an initializer that runs later). Adapters that require all labels to be declared up front, such as [yabeda-prometheus], will otherwise reject the metric.
-
-Pausing a queue is a [Sidekiq Pro] feature. On OSS Sidekiq the label is still emitted, always with the value `unpaused`.
+Pausing a queue is a [Sidekiq Pro] feature. On OSS Sidekiq the metric is still collected, always with the value `0`.
 
 ### Client metrics
 
@@ -135,7 +133,7 @@ Configuration is handled by [anyway_config] gem. With it you can load settings f
 | `declare_process_metrics`                      | boolean | Enabled in Sidekiq worker processes, disabled otherwise | Declare metrics that are only tracked inside worker process even outside of them. Useful for multiprocess metric collection.                       |
 | `retries_segmented_by_queue`                   | boolean | Disabled                                                | Defines wheter retries are segemented by queue or reported as a single metric                                                                      |
 | `label_for_error_class_on_sidekiq_jobs_failed` | boolean | Disabled                                                | Defines whether `error` label should be added to `sidekiq_jobs_failed_total` metric.                                                               |
-| `show_queue_state`                             | boolean | Disabled                                                | Defines whether `state` label (`paused`/`unpaused`) should be added to `sidekiq_jobs_waiting_count` and `sidekiq_queue_latency` metrics.            |
+| `show_queue_state`                             | boolean | Disabled                                                | Defines whether the `sidekiq_queue_paused` metric (1 when paused, 0 when not) should be collected.                                                 |
 
 # Roadmap (TODO or Help wanted)
 

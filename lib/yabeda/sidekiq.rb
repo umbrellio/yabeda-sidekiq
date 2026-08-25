@@ -61,9 +61,8 @@ module Yabeda
       # You can opt-out from collecting these by setting YABEDA_SIDEKIQ_COLLECT_CLUSTER_METRICS to falsy value (+no+ or +false+)
       if config.collect_cluster_metrics # defaults to +::Sidekiq.server?+
         retry_count_tags = config.retries_segmented_by_queue ? %i[queue] : []
-        per_queue_tags = config.show_queue_state ? %i[queue state] : %i[queue]
 
-        gauge     :jobs_waiting_count,   tags: per_queue_tags,   aggregation: :most_recent, comment: "The number of jobs waiting to process in sidekiq."
+        gauge     :jobs_waiting_count,   tags: %i[queue],        aggregation: :most_recent, comment: "The number of jobs waiting to process in sidekiq."
         gauge     :active_workers_count, tags: [],               aggregation: :most_recent, comment: "The number of busy Sidekiq worker threads (global counter)."
         gauge     :jobs_scheduled_count, tags: [],               aggregation: :most_recent, comment: "The number of jobs scheduled for later execution."
         gauge     :jobs_retry_count,     tags: retry_count_tags, aggregation: :most_recent, comment: "The number of failed jobs waiting to be retried"
@@ -71,8 +70,16 @@ module Yabeda
         gauge     :active_processes,     tags: [],               aggregation: :most_recent, comment: "The number of active Sidekiq worker processes."
         gauge     :total_workers,        tags: [],               aggregation: :most_recent, comment: "The number of running Sidekiq worker threads for current host."
         gauge     :busy_workers,         tags: [],               aggregation: :most_recent, comment: "The number of busy Sidekiq worker threads for current host."
-        gauge     :queue_latency,        tags: per_queue_tags,   aggregation: :most_recent,
+        gauge     :queue_latency,        tags: %i[queue],        aggregation: :most_recent,
                                          comment: "The queue latency, the difference in seconds since the oldest job in the queue was enqueued"
+
+        # NOTE: declared unconditionally, but only collected when +show_queue_state+ is enabled.
+        #   Declaring it up front keeps the metric out of the initialization-order trap: adapters
+        #   that require all metrics to be declared before the first collection (yabeda-prometheus
+        #   among them) don't care whether the setting arrived from an env variable or from an
+        #   initializer that runs later.
+        gauge     :queue_paused,         tags: %i[queue],        aggregation: :most_recent,
+                                         comment: "Whether the queue is paused (1) or not (0)."
       end
 
       collect do
@@ -82,13 +89,9 @@ module Yabeda
 
         stats = ::Sidekiq::Stats.new
         queues = ::Sidekiq::Queue.all
-        queue_states = Yabeda::Sidekiq.queue_states(queues)
 
         stats.queues.each do |name, size|
-          sidekiq_jobs_waiting_count.set(
-            Yabeda::Sidekiq.queue_tags(name, queue_states),
-            size,
-          )
+          sidekiq_jobs_waiting_count.set({ queue: name }, size)
         end
         sidekiq_active_workers_count.set({}, stats.workers_size)
         sidekiq_jobs_scheduled_count.set({}, stats.scheduled_size)
@@ -103,7 +106,10 @@ module Yabeda
         end
 
         queues.each do |queue|
-          sidekiq_queue_latency.set(Yabeda::Sidekiq.queue_tags(queue.name, queue_states), queue.latency)
+          sidekiq_queue_latency.set({ queue: queue.name }, queue.latency)
+          next unless config.show_queue_state
+
+          sidekiq_queue_paused.set({ queue: queue.name }, Yabeda::Sidekiq.queue_paused?(queue) ? 1 : 0)
         end
 
         if config.retries_segmented_by_queue
@@ -151,34 +157,14 @@ module Yabeda
         worker.method(:yabeda_tags).arity.zero? ? worker.yabeda_tags : worker.yabeda_tags(*job["args"])
       end
 
-      # Tags for the per-queue cluster gauges (+jobs_waiting_count+ and +queue_latency+).
+      # Whether the queue is currently paused.
       #
-      # +states+ is the queue name to pause state mapping built by +queue_states+ for the
-      # current collection cycle. A queue may be listed by +Sidekiq::Stats#queues+ and still be
-      # missing from the mapping (it was created or removed between the two Redis reads), so
-      # fall back to +unpaused+ rather than emitting a +nil+ label that no adapter can render.
-      def queue_tags(queue_name, states)
-        return { queue: queue_name } unless config.show_queue_state
-
-        { queue: queue_name, state: states.fetch(queue_name, QUEUE_STATE_UNPAUSED) }
-      end
-
-      # Queue name to pause state mapping for the current collection cycle.
-      # Empty, and free of any Redis calls, unless the +state+ label is enabled.
-      def queue_states(queues)
-        return {} unless config.show_queue_state
-
-        queues.each_with_object({}) { |queue, states| states[queue.name] = queue_state(queue) }
-      end
-
       # NOTE: pausing a queue is a Sidekiq Pro feature. OSS Sidekiq provides +paused?+ as a hook
       #   that is always +false+ (Pro overrides it), but not every Sidekiq version does, so treat
       #   a missing +paused?+ as "this queue cannot be paused" instead of letting a NoMethodError
       #   abort the whole collection cycle and take every other metric down with it.
-      def queue_state(queue)
-        return QUEUE_STATE_UNPAUSED unless queue.respond_to?(:paused?)
-
-        queue.paused? ? QUEUE_STATE_PAUSED : QUEUE_STATE_UNPAUSED
+      def queue_paused?(queue)
+        queue.respond_to?(:paused?) && queue.paused?
       end
 
       # Hash of hashes containing all currently running jobs' start timestamps
