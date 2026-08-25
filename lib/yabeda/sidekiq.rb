@@ -50,23 +50,6 @@ module Yabeda
                                 unit: :seconds, per: :job,
                                 tags: %i[queue worker],
                                 buckets: LONG_RUNNING_JOB_RUNTIME_BUCKETS
-
-        # NOTE: The event is published by ServerMiddleware. Allocation stats are read
-        # from the Event: +allocations+ is provided by ActiveSupport 6+ itself,
-        # +malloc_increase_bytes+ appears when the Event class is patched by umbrellio-utils.
-        if defined?(::ActiveSupport::Notifications)
-          ::ActiveSupport::Notifications.subscribe("perform.sidekiq_job") do |event|
-            next unless event.respond_to?(:allocations)
-
-            labels = { queue: event.payload[:queue], worker: event.payload[:worker] }
-
-            Yabeda.sidekiq_allocations_total.increment(labels, by: event.allocations)
-
-            if event.respond_to?(:malloc_increase_bytes) && event.malloc_increase_bytes.positive?
-              Yabeda.sidekiq_malloc_increase_bytes.increment(labels, by: event.malloc_increase_bytes)
-            end
-          end
-        end
       end
 
       # Metrics not specific for current Sidekiq process, but representing state of the whole Sidekiq installation (queues, processes, etc)
@@ -84,6 +67,14 @@ module Yabeda
         gauge     :busy_workers,         tags: [],               aggregation: :most_recent, comment: "The number of busy Sidekiq worker threads for current host."
         gauge     :queue_latency,        tags: %i[queue],        aggregation: :most_recent,
                                          comment: "The queue latency, the difference in seconds since the oldest job in the queue was enqueued"
+
+        # NOTE: declared unconditionally, but only collected when +show_queue_state+ is enabled.
+        #   Declaring it up front keeps the metric out of the initialization-order trap: adapters
+        #   that require all metrics to be declared before the first collection (yabeda-prometheus
+        #   among them) don't care whether the setting arrived from an env variable or from an
+        #   initializer that runs later.
+        gauge     :queue_paused,         tags: %i[queue],        aggregation: :most_recent,
+                                         comment: "Whether the queue is paused (1) or not (0)."
       end
 
       collect do
@@ -92,9 +83,10 @@ module Yabeda
         next unless config.collect_cluster_metrics
 
         stats = ::Sidekiq::Stats.new
+        queues = ::Sidekiq::Queue.all
 
-        stats.queues.each do |k, v|
-          sidekiq_jobs_waiting_count.set({ queue: k }, v)
+        stats.queues.each do |name, size|
+          sidekiq_jobs_waiting_count.set({ queue: name }, size)
         end
         sidekiq_active_workers_count.set({}, stats.workers_size)
         sidekiq_jobs_scheduled_count.set({}, stats.scheduled_size)
@@ -108,8 +100,11 @@ module Yabeda
           sidekiq_busy_workers.set({}, process["busy"].to_i)
         end
 
-        ::Sidekiq::Queue.all.each do |queue|
+        queues.each do |queue|
           sidekiq_queue_latency.set({ queue: queue.name }, queue.latency)
+          next unless config.show_queue_state
+
+          sidekiq_queue_paused.set({ queue: queue.name }, Yabeda::Sidekiq.queue_paused?(queue) ? 1 : 0)
         end
 
         if config.retries_segmented_by_queue
@@ -157,6 +152,16 @@ module Yabeda
         worker.method(:yabeda_tags).arity.zero? ? worker.yabeda_tags : worker.yabeda_tags(*job["args"])
       end
 
+      # Whether the queue is currently paused.
+      #
+      # NOTE: pausing a queue is a Sidekiq Pro feature. OSS Sidekiq provides +paused?+ as a hook
+      #   that is always +false+ (Pro overrides it), but not every Sidekiq version does, so treat
+      #   a missing +paused?+ as "this queue cannot be paused" instead of letting a NoMethodError
+      #   abort the whole collection cycle and take every other metric down with it.
+      def queue_paused?(queue)
+        queue.respond_to?(:paused?) && queue.paused?
+      end
+
       # Hash of hashes containing all currently running jobs' start timestamps
       # to calculate maximum durations of currently running not yet completed jobs
       # { { queue: "default", worker: "SomeJob" } => { "jid1" => 100500, "jid2" => 424242 } }
@@ -168,6 +173,23 @@ module Yabeda
           oldest_job_started_at = jobs.values.min
           oldest_job_duration = oldest_job_started_at ? (now - oldest_job_started_at).round(3) : 0
           Yabeda.sidekiq.running_job_runtime.set(labels, oldest_job_duration)
+        end
+      end
+
+      def track_sidekiq_allocations_by_default
+        # NOTE: The event is published by ServerMiddleware. Allocation stats are read
+        # from the Event: +allocations+ is provided by ActiveSupport 6+ itself,
+        # +malloc_increase_bytes+ appears when the Event class is patched by umbrellio-utils.
+        return unless defined?(::ActiveSupport::Notifications)
+
+        ::ActiveSupport::Notifications.subscribe("perform.sidekiq_job") do |event|
+          next unless event.respond_to?(:allocations)
+
+          labels = { queue: event.payload[:queue], worker: event.payload[:worker] }
+          Yabeda.sidekiq_allocations_total.increment(labels, by: event.allocations)
+          if event.respond_to?(:malloc_increase_bytes) && event.malloc_increase_bytes.positive?
+            Yabeda.sidekiq_malloc_increase_bytes.increment(labels, by: event.malloc_increase_bytes)
+          end
         end
       end
     end

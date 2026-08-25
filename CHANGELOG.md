@@ -9,9 +9,19 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 ### Added
 
+- **(24.08.2026)** `perform.sidekiq_job` is shadowed via `config.gather_memory_alloc_metrics` configuration that is disabled by default (`false`)
+
+- **(24.08.2026)** `perform.sidekiq_job` event subscription is not more autoamtically generated, you need manually invoke `Yabeda::Sidekiq.track_sidekiq_allocations_by_default` in your code. It was made cuz client projects can have their own active-support-based event->prometehus gathering with their own format. You can use the default yabed-sidekiq-tracking subscirpition or make your own.
+
 - Object allocation metrics for job execution: `sidekiq_allocations_total` (object count) and `sidekiq_malloc_increase_bytes` (off-heap malloc increase since the last GC), both segmented by queue and worker. `sidekiq_malloc_increase_bytes` requires the `ActiveSupport::Notifications::Event` patch from [umbrellio-utils](https://github.com/umbrellio/utils).
 
 - `perform.sidekiq_job` ActiveSupport notification wrapping job execution (when ActiveSupport is available), so custom metrics and logging subscribers can measure jobs.
+
+- `sidekiq_queue_paused` gauge (1 when the queue is paused, 0 when it is not), gated by the `show_queue_state` configuration setting, telling a paused queue apart from an overloaded one.
+
+  It is disabled by default because it costs an extra Redis call per queue on every collection cycle. It adds a metric and changes no existing one, so existing queries keep working. Pausing queues is a Sidekiq Pro feature; on OSS Sidekiq every queue is reported as `0`.
+
+  Deliberately a separate metric rather than a `state` label on `sidekiq_jobs_waiting_count` and `sidekiq_queue_latency`: Prometheus gauges never forget a label combination, so a resumed queue would keep exporting its stale `state="paused"` series alongside the live one, with no way for a query to tell them apart.
 
 ## 0.12.0 - 2024-03-08
 
