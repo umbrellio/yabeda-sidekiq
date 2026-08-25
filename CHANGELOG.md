@@ -17,10 +17,6 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 - `perform.sidekiq_job` ActiveSupport notification wrapping job execution (when ActiveSupport is available), so custom metrics and logging subscribers can measure jobs.
 
-- `show_queue_state` configuration setting to add a `state` label (`paused`/`unpaused`) to `sidekiq_jobs_waiting_count` and `sidekiq_queue_latency`, telling a paused queue apart from an overloaded one.
-
-  It is disabled by default: it costs an extra Redis call per queue on every collection cycle, and adding a label changes the time series of both metrics, breaking existing queries. Pausing queues is a Sidekiq Pro feature; on OSS Sidekiq every queue is reported as `unpaused`.
-
 - `sidekiq_queue_paused` gauge (1 when the queue is paused, 0 when it is not), gated by the `show_queue_state` configuration setting, telling a paused queue apart from an overloaded one.
 
   It is disabled by default because it costs an extra Redis call per queue on every collection cycle. It adds a metric and changes no existing one, so existing queries keep working. Pausing queues is a Sidekiq Pro feature; on OSS Sidekiq every queue is reported as `0`.

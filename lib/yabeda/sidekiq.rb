@@ -16,11 +16,6 @@ module Yabeda
       30, 60, 120, 300, 1800, 3600, 21_600, # Sidekiq tasks may be very long-running
     ].freeze
 
-    # Values of the optional +state+ label on per-queue cluster metrics.
-    # See +Yabeda::Sidekiq::Config#show_queue_state+.
-    QUEUE_STATE_PAUSED = "paused"
-    QUEUE_STATE_UNPAUSED = "unpaused"
-
     def self.config
       @config ||= Config.new
     end
